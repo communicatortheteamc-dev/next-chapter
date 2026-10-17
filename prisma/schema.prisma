@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum Role {
+ CUSTOMER
+ OWNER
+ MANAGER
+ SUPPORT
+}
+model User {
+ id String @id @default(cuid())
+ email String @unique
+ name String
+ passwordHash String
+ role Role @default(CUSTOMER)
+ createdAt DateTime @default(now())
+}
+// Typed commerce aggregate: catalogue/variants, inventory ledger, orders,
+// CRM, content, coupons and audit. Version CAS protects all inventory changes.
+model CommerceState {
+ id String @id @default("main")
+ version Int @default(0)
+ data Json
+ updatedAt DateTime @updatedAt
+}

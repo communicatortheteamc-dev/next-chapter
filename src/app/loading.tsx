@@ -1,0 +1,1 @@
+export default function Loading(){return <div className="section loading-state" role="status"><span className="eyebrow">MAKING ROOM FOR SOMETHING GOOD</span><div className="skeleton"/><p>Loading the studio…</p></div>;}

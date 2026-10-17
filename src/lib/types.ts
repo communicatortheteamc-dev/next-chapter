@@ -1,0 +1,14 @@
+export type Role = 'CUSTOMER' | 'OWNER' | 'MANAGER' | 'SUPPORT';
+export type Variant = { id:string; size:string; color:string; hex:string; stock:number; sku:string };
+export type Product = { id:string; slug:string; name:string; category:string; price:number; taxRate?:number; compareAt?:number; fit:string; material:string; description:string; images:string[]; variants:Variant[]; createdAt:string; archived:boolean; collection:string; sold?:number; };
+export type CartLine = { variantId:string; quantity:number };
+export type Address = { name:string; email:string; phone:string; line1:string; city:string; state:string; postcode:string };
+export type Order = { id:string; token:string; userId?:string; address:Address; items:{variantId:string; name:string; size:string; color:string; quantity:number; price:number; image:string}[]; subtotal:number; discount:number; shipping:number; tax:number; total:number; coupon?:string; status:string; payment:string; paymentId?:string; razorpayOrderId?:string; paymentAttempt?:{id:string;at:string}; tracking?:string; createdAt:string; };
+export type Customer = { id:string; email:string; name:string; phone:string; tags:string[]; notes:string[]; marketing:boolean; assignedTo:string; followUp:string; addresses:Address[]; wishlist:string[]; };
+export type Ticket = {id:string; customerEmail:string; subject:string; message:string; kind:'Support'|'Bulk'|'International'|'Return'|'Exchange'|'Restock'; status:string; assignedTo:string; followUp:string; createdAt:string;};
+export type Coupon = { id:string; code:string; percent:number; minimum:number; limit:number; used:number; starts:string; ends:string; categories:string[]; };
+export type Collection = {id:string; name:string; rule:string; productIds:string[]};
+export type Review = {id:string; productId:string; name:string; rating:number; text:string; status:string};
+export type Settings = { announcement:string; freeShipping:number; shippingFee:number; returnDays:number; cod:boolean; codPostcodes:string[]; bannerTitle:string; bannerText:string; faqs:{q:string;a:string}[]; policies:Record<string,string>; };
+export type Audit = {id:string; actor:string; action:string; createdAt:string};
+export type State = { products:Product[]; orders:Order[]; customers:Customer[]; tickets:Ticket[]; coupons:Coupon[]; collections:Collection[]; reviews:Review[]; settings:Settings; audit:Audit[]; inventory:{id:string;variantId:string;delta:number;reason:string;createdAt:string}[]; webhookIds:string[]; subscribers:string[]; };

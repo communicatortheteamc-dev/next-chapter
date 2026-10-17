@@ -1,0 +1,27 @@
+import { randomUUID,createHmac,timingSafeEqual } from 'node:crypto';
+import { z } from 'zod';
+import type { State,CartLine,Order } from './types';
+export const lineSchema=z.object({variantId:z.string().min(1).max(100),quantity:z.number().int().min(1).max(10)});
+export const addressSchema=z.object({name:z.string().trim().min(2).max(100),email:z.email().toLowerCase(),phone:z.string().regex(/^[6-9]\d{9}$/,'Enter a valid 10-digit Indian mobile number'),line1:z.string().trim().min(5).max(200),city:z.string().trim().min(2).max(80),state:z.string().trim().min(2).max(80),postcode:z.string().regex(/^[1-9]\d{5}$/,'Enter a six-digit Indian postcode')});
+export const checkoutSchema=z.object({items:z.array(lineSchema).min(1).max(50),address:addressSchema,coupon:z.string().max(40).optional(),payment:z.enum(['sandbox','cod','razorpay']),requestId:z.string().uuid()});
+export function quote(state:State,lines:CartLine[],code?:string){
+ if(!lines.length)throw Error('Your bag is empty.');const merged=new Map<string,number>();for(const l of lines){lineSchema.parse(l);merged.set(l.variantId,(merged.get(l.variantId)||0)+l.quantity);}
+ const items=Array.from(merged,([variantId,quantity])=>{if(quantity>10)throw Error('Maximum 10 of each variant.');const product=state.products.find(p=>!p.archived&&p.variants.some(v=>v.id===variantId));const variant=product?.variants.find(v=>v.id===variantId);if(!product||!variant)throw Error('An item is no longer available.');if(variant.stock<quantity)throw Error(`${product.name}, ${variant.size}: only ${variant.stock} available.`);return {variantId,name:product.name,size:variant.size,color:variant.color,quantity,price:product.price,image:product.images[0]};});
+ const subtotal=items.reduce((sum,i)=>sum+i.price*i.quantity,0);let discount=0;const coupon=code?state.coupons.find(c=>c.code===code.trim().toUpperCase()):undefined;
+ if(code){const now=new Date().toISOString().slice(0,10);if(!coupon||coupon.starts>now||coupon.ends<now||coupon.used>=coupon.limit)throw Error('This coupon is unavailable.');if(subtotal<coupon.minimum)throw Error(`This coupon requires an order of ₹${coupon.minimum/100}.`);if(coupon.categories.length&&items.some(i=>!state.products.some(p=>p.variants.some(v=>v.id===i.variantId)&&coupon.categories.includes(p.category))))throw Error('This coupon does not apply to these items.');discount=Math.round(subtotal*coupon.percent/100);}
+ const shipping=subtotal-discount>=state.settings.freeShipping?0:state.settings.shippingFee;const total=subtotal-discount+shipping;
+ // Prices are tax-inclusive. Allocate the coupon proportionally across items.
+ const tax=Math.round(items.reduce((sum,item)=>{const product=state.products.find(p=>p.variants.some(v=>v.id===item.variantId))!;const rate=product.taxRate??5;return sum+item.price*item.quantity*(1-discount/subtotal)*rate/(100+rate);},0));
+ return {items,subtotal,discount,shipping,total,tax,coupon:coupon?.code};
+}
+export function createOrder(state:State,input:z.infer<typeof checkoutSchema>,userId?:string):Order{
+ const existing=state.orders.find(o=>o.id===input.requestId);if(existing){if(existing.address.email!==input.address.email||existing.payment!==input.payment)throw Error('Invalid checkout request.');if(existing.status==='Cancelled')throw Error('This checkout was cancelled. Start a new checkout.');return existing;}
+ const totals=quote(state,input.items,input.coupon);if(input.payment==='cod'&&(!state.settings.cod||!state.settings.codPostcodes.includes(input.address.postcode)))throw Error('Cash on delivery is unavailable for this postcode.');
+ if(input.payment==='sandbox'&&process.env.DATABASE_URL)throw Error('Sandbox orders are disabled for a live database.');
+ const order:Order={id:input.requestId,token:randomUUID(),userId,address:input.address,...totals,payment:input.payment,status:input.payment==='razorpay'?'Awaiting payment':input.payment==='sandbox'?'Demo confirmed':'Confirmed',createdAt:new Date().toISOString()};
+ for(const item of order.items){const v=state.products.flatMap(p=>p.variants).find(v=>v.id===item.variantId)!;v.stock-=item.quantity;state.inventory.push({id:randomUUID(),variantId:v.id,delta:-item.quantity,reason:`Order ${order.id}`,createdAt:order.createdAt});}
+ if(order.coupon)state.coupons.find(c=>c.code===order.coupon)!.used++;
+ state.orders.push(order);let customer=state.customers.find(c=>c.email===input.address.email);if(!customer){customer={id:randomUUID(),email:input.address.email,name:input.address.name,phone:input.address.phone,tags:[],notes:[],marketing:false,assignedTo:'',followUp:'',addresses:[],wishlist:[]};state.customers.push(customer);}return order;
+}
+export function validSignature(raw:string,signature:string,secret:string){if(!/^[a-f0-9]{64}$/i.test(signature))return false;return timingSafeEqual(Buffer.from(signature,'hex'),Buffer.from(createHmac('sha256',secret).update(raw).digest('hex'),'hex'));}
+export function applyPayment(state:State,eventId:string,entity:{order_id:string;id:string;amount:number;currency:string}){if(state.webhookIds.includes(eventId))return;const order=state.orders.find(o=>o.razorpayOrderId===entity.order_id);if(!order)throw Error('Unknown payment order.');if(order.total!==entity.amount||entity.currency!=='INR')throw Error('Payment amount mismatch.');if(order.status==='Cancelled')throw Error('Cancelled order requires manual payment review.');order.paymentId=entity.id;if(order.status==='Awaiting payment')order.status='Paid';state.webhookIds.push(eventId);}
